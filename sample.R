@@ -1,0 +1,137 @@
+library(shape)
+library(markovchain)
+library(diagram)
+
+# Creating a transition matrix
+trans_mat <- matrix(c(0.98144,0.01856, 0, 0,0.97638, 0.02362, 0,0,1),nrow = 3, byrow = TRUE)
+trans_mat
+
+# create the Discrete Time Markov Chain
+disc_trans <- new("markovchain",transitionMatrix=trans_mat, states=c("PFS","PD", "Death"), name="Markov Chain for VRD") 
+disc_trans
+plot(disc_trans)
+
+#VRD
+#Transition matrix in VRD for PFS and PD
+p_pfs_pd_vrd = 0.01856
+p_pd_death_vrd = 0.02362
+  
+#Cost in VRD for PFS and PD
+NHIF_Induction_AE_PFS_vrd = 20585.32951
+NHIF_Induction_AE_PD_vrd = 6719.213517
+NHIF_Induction_AE_nonmedicalcost_PFS_vrd = 25463.70789
+NHIF_Induction_AE_nonmedicalcost_PD_vrd = 11305.42041
+CASH_Induction_AE_PFS_vrd =19499.816
+CASH_Induction_AE_PD_vrd = 5610.110069
+CASH_Induction_AE_nonmedical_cost_PFS_vrd = 24378.19438
+CASH_Induction_AE_nonmedical_cost_PD_vrd = 10196.31697
+U_PFS_vrd = 0.81
+U_PD_vrd = 0.645
+
+n_cycles_vrd = 72
+n_states_vrd = 3
+n_patients_vrd = 1000
+    
+v_states_names_vrd = c("PFS", "PD", "Death")
+    
+m_p_vrd = matrix(0, nrow = 3, ncol = 3,
+                 dimnames = list(from = v_states_names_vrd,
+                                 to = v_states_names_vrd))
+m_p_vrd["PFS", "PFS"] = 1 - p_pfs_pd_vrd
+m_p_vrd["PFS", "PD"] = p_pfs_pd_vrd
+m_p_vrd["PFS", "Death"] = 0
+m_p_vrd["PD", "Death"] = p_pd_death_vrd
+m_p_vrd["PD", "PFS"] = 0
+m_p_vrd["PD", "PD"] = 1- p_pd_death_vrd
+m_p_vrd["Death", "Death"] = 1
+    
+state_membership_vrd = array(NA_real_,
+                             dim = c(n_cycles_vrd, n_states_vrd),
+                             dimnames = list(cycle = 1:n_cycles_vrd,
+                                                 state = v_states_names_vrd))
+state_membership_vrd[1, ] = c(n_patients_vrd, 0, 0)
+for (i in 2:n_cycles_vrd) {
+  state_membership_vrd[i, ] = state_membership_vrd[i-1, ] %*% m_p_vrd}
+    
+#NHIF_Induction_AE
+m_payoffs_NHIF_Induction_AE_vrd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_vrd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+m_payoffs_NHIF_Induction_AE_vrd["PFS", "Cost"] = NHIF_Induction_AE_PFS_vrd
+m_payoffs_NHIF_Induction_AE_vrd["PFS", "QALYs"] = U_PFS_vrd
+m_payoffs_NHIF_Induction_AE_vrd["PD", "Cost"] = NHIF_Induction_AE_PD_vrd
+m_payoffs_NHIF_Induction_AE_vrd["PD", "QALYs"] = U_PD_vrd
+    
+#NHIF_Induction_AE_NONMEDICAL_COST
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd = matrix(0, nrow = 3, ncol = 2,
+                                                    dimnames = list(state = v_states_names_vrd,
+                                                                    payoffs = c("Cost", "QALYs")))
+    
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PFS", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PFS_vrd
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PFS", "QALYs"] = U_PFS_vrd
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PD", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PD_vrd
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PD", "QALYs"] = U_PD_vrd
+    
+#CASH_Induction_AE
+m_payoffs_CASH_Induction_AE_vrd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_vrd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+m_payoffs_CASH_Induction_AE_vrd["PFS", "Cost"] = CASH_Induction_AE_PFS_vrd
+m_payoffs_CASH_Induction_AE_vrd["PFS", "QALYs"] = U_PFS_vrd
+m_payoffs_CASH_Induction_AE_vrd["PD", "Cost"] = CASH_Induction_AE_PD_vrd
+m_payoffs_CASH_Induction_AE_vrd["PD", "QALYs"] = U_PD_vrd
+    
+#CASH_Induction_AE_NONMEDICAL_COST
+m_payoffs_cash_Induction_AE_nonmedical_vrd = matrix(0, nrow = 3, ncol = 2,
+                                                    dimnames = list(state = v_states_names_vrd, 
+                                                                    payoffs = c("Cost", "QALYs")))
+    
+m_payoffs_cash_Induction_AE_nonmedical_vrd["PFS", "Cost"] = CASH_Induction_AE_nonmedical_cost_PFS_vrd
+m_payoffs_cash_Induction_AE_nonmedical_vrd["PFS", "QALYs"] = U_PFS_vrd
+m_payoffs_cash_Induction_AE_nonmedical_vrd["PD", "Cost"] = CASH_Induction_AE_nonmedical_cost_PD_vrd
+m_payoffs_cash_Induction_AE_nonmedical_vrd["PD", "QALYs"] = U_PD_vrd
+    
+#View the matrix
+m_payoffs_CASH_Induction_AE_vrd
+m_payoffs_cash_Induction_AE_nonmedical_vrd
+m_payoffs_NHIF_Induction_AE_vrd
+m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+    
+    
+#Total  cost and QALYs of for PFS state
+#m_payoffs_CASH_Induction_AE_trace_PFS = state_membership_vrd[, "PFS", , drop = FALSE] %*% m_payoffs_CASH_Induction_AE_vrd
+#m_payoffs_cash_Induction_AE_nonmedical_trace_PFS= state_membership_vrd[, "PFS", , drop = FALSE] %*%m_payoffs_cash_Induction_AE_nonmedical_vrd
+#m_payoffs_NHIF_Induction_AE_trace_PFS = state_membership_vrd[, "PFS", , drop = FALSE] %*%m_payoffs_NHIF_Induction_AE_vrd
+#m_payoffs_NHIF_Induction_AE_nonmedical_trace_PFS = state_membership_vrd[, "PFS", , drop = FALSE] %*%m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+    
+#Total  cost and QALYs of for PD state
+#m_payoffs_CASH_Induction_AE_trace_PD = state_membership_vrd[, "PD", , drop = FALSE] %*% m_payoffs_CASH_Induction_AE_vrd
+#m_payoffs_cash_Induction_AE_nonmedical_trace_PD= state_membership_vrd[, "PD", , drop = FALSE] %*%m_payoffs_cash_Induction_AE_nonmedical_vrd
+#m_payoffs_NHIF_Induction_AE_trace_PD = state_membership_vrd[, "PD", , drop = FALSE] %*%m_payoffs_NHIF_Induction_AE_vrd
+#m_payoffs_NHIF_Induction_AE_nonmedical_trace_PD = state_membership_vrd[, "PD", , drop = FALSE] %*%m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+  
+#Total  cost of all patients
+m_payoffs_CASH_Induction_AE_trace_vrd = state_membership_vrd %*% m_payoffs_CASH_Induction_AE_vrd
+m_payoffs_cash_Induction_AE_nonmedical_trace_vrd= state_membership_vrd %*%m_payoffs_cash_Induction_AE_nonmedical_vrd
+m_payoffs_NHIF_Induction_AE_trace_vrd = state_membership_vrd %*%m_payoffs_NHIF_Induction_AE_vrd
+m_payoffs_NHIF_Induction_AE_nonmedical_trace_vrd = state_membership_vrd %*%m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+  
+#Average cost per patients per state and cumulatively
+average_cost_QALYS=list(
+  colSums(m_payoffs_CASH_Induction_AE_trace_vrd) / n_patients_vrd,
+  colSums(m_payoffs_cash_Induction_AE_nonmedical_trace_vrd) / n_patients_vrd,
+  colSums(m_payoffs_NHIF_Induction_AE_trace_vrd) / n_patients_vrd,
+  colSums(m_payoffs_NHIF_Induction_AE_nonmedical_trace_vrd) / n_patients_vrd
+  )
+#Adding labels to each output
+label_names_vrd <- c("Average Cost and QALYs (In Induction, Maintenance and AE paid through CASH)",
+                         "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through CASH)",
+                         "Average Cost and QALYs (In Induction, Maintenance and AE paid through NHIF)",
+                         "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through NHIF)")
+#Title for the overall output
+cat(
+  for (i in seq_along(average_cost_QALYS)) {cat("\n[", i, "]", label_names_vrd[i], ":\n")
+    print(average_cost_QALYS[[i]])
+    

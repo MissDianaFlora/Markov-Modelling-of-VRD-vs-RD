@@ -1,0 +1,393 @@
+---
+title: "Cost effectiveness analysis of VRD vs RD using 3-state Markov Model"
+author: "Diana Flora Namaemba"
+date: "2024-02-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Setting up a Markov Model for the Bortezomib + Lenalidomide + Dexamethasone (VRD)  the Intervention Arm
+A markov model of 3-states (Progressive Free Survival(PFS), Progressive Disease (PD), Death), setting up the transitional matrix
+```{r}
+#Load the Shape Package
+library(shape)
+#Load the markovchain Package
+library(markovchain)
+#Load the diagram package
+library(diagram)
+
+#Creating the transition matrix of VRD
+tm_vrd <- matrix(c(0.98144,0.01856, 0, 0,0.97638, 0.02362, 0,0,1),nrow = 3, byrow = TRUE)
+tm_vrd
+
+#create the Discrete Time Markov Chain
+vrd_trans <- new("markovchain",transitionMatrix=tm_vrd, states=c("PFS","PD", "Death"), name="Markov Chain for VRD") 
+vrd_trans
+
+#Visualize the Movement from one state to another
+plot(vrd_trans)
+```
+
+### List of all parameters in the model
+The parameters include: transitional probabilities, costs, utilities e.t.c
+```{r}
+#List of all parameters in VRD
+params_vrd = list(
+  #Transition Probability from PFS to PD
+  p_pfs_pd_vrd = 0.01856, 
+  #Transition Probability from PD to Death
+  p_pd_death_vrd = 0.02362, 
+
+  #Cost incurred in PFS State during induction, Maintenance and in Adverse Events, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_PFS_vrd = 20585.32951,
+  
+  #Cost incurred in PD State during induction, Maintenance and in Adverse Events, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_PD_vrd = 6719.213517,
+  
+  #Cost incurred in PFS State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_nonmedicalcost_PFS_vrd = 25463.70789,
+  
+  #Cost incurred in PD State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_nonmedicalcost_PD_vrd = 11305.42041,
+  
+  #Cost incurred in PFS State during induction, Maintenance and adverse Events, when some payments were made by Cash
+  CASH_Induction_AE_PFS_vrd =19499.816,
+  
+  #Cost incurred in PD State during induction, Maintenance and adverse Events when some payments were made by Cash
+  CASH_Induction_AE_PD_vrd = 5610.110069,
+  
+  #Cost incurred in PFS State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by CASH
+  CASH_Induction_AE_nonmedical_cost_PFS_vrd = 24378.19438,
+  
+  #Cost incurred in PD State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by Cash
+  CASH_Induction_AE_nonmedical_cost_PD_vrd = 10196.31697,
+  
+  #Utilities in PFS state
+  U_PFS_vrd = 0.81,
+  #Utilities in PD stat
+  U_PD_vrd = 0.645
+)
+```
+
+### A Model that calculates the QALYs and Average Cost per patient
+
+```{r}
+#Create a function of the parameters
+model_vrd = function(.params_vrd) {
+  with(.params_vrd, {
+    #Number of cycles in the life horizon of the study
+    n_cycles_vrd = 72
+    #Number of States
+    n_states_vrd = 3
+    #Number of Patients
+    n_patients_vrd = 1000
+    #The states in VRD
+    v_states_names_vrd = c("PFS", "PD", "Death")
+    #Create a transition matrix with zero values, its 3 by 3 because of 3-states
+    m_p_vrd = matrix(0, nrow = 3, ncol = 3,
+                 dimnames = list(from = v_states_names_vrd,
+                                 to = v_states_names_vrd))
+    #Update the matrix with the actual values of moving from one state to another
+    #Update the transitional probability of moving from PFS to PFS
+    m_p_vrd["PFS", "PFS"] = 1 - p_pfs_pd_vrd
+    #Update the transitional probability of moving from PFS to PD
+    m_p_vrd["PFS", "PD"] = p_pfs_pd_vrd
+    #Update the transitional probability of moving from PFS to Death
+    m_p_vrd["PFS", "Death"] = 0
+    #Update the transitional probability of moving from PD to Death
+    m_p_vrd["PD", "Death"] = p_pd_death_vrd
+    #Update the transitional probability of moving from PD to PFS
+    m_p_vrd["PD", "PFS"] = 0
+    #Update the transitional probability of moving from PD to PD
+    m_p_vrd["PD", "PD"] = 1- p_pd_death_vrd
+    #Update the transitional probability of moving from Death to Death
+    m_p_vrd["Death", "Death"] = 1
+    
+    #Create state membership matrix
+    state_membership_vrd = array(NA_real_,
+                             dim = c(n_cycles_vrd, n_states_vrd),
+                             dimnames = list(cycle = 1:n_cycles_vrd,
+                                             state = v_states_names_vrd))
+    #Update the first state membership with 1000, at the start all the patients are in PFS state
+    state_membership_vrd[1, ] = c(n_patients_vrd, 0, 0)
+    
+    #Update the rest of the state membership with the number of patients at each state and each cycle
+    for (i in 2:n_cycles_vrd) {
+      state_membership_vrd[i, ] = state_membership_vrd[i-1, ] %*% m_p_vrd
+    }
+    
+    #A zero matrix for cost incurred in Induction, Maintenance and Adverse events paid for by NHIF and QALYs incurred in different states
+    m_payoffs_NHIF_Induction_AE_vrd = matrix(0, nrow = 3, ncol = 2,
+                       dimnames = list(state = v_states_names_vrd,
+                                       payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by NHIF for Induction, Maintenance and Adverse events
+    m_payoffs_NHIF_Induction_AE_vrd["PFS", "Cost"] = NHIF_Induction_AE_PFS_vrd
+    m_payoffs_NHIF_Induction_AE_vrd["PFS", "QALYs"] = U_PFS_vrd
+    m_payoffs_NHIF_Induction_AE_vrd["PD", "Cost"] = NHIF_Induction_AE_PD_vrd
+    m_payoffs_NHIF_Induction_AE_vrd["PD", "QALYs"] = U_PD_vrd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance, Adverse events and non-medical costs and paid for by NHIF and QALYs incurred in different states
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_vrd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by NHIF for Induction, Maintenance, Adverse events and non-medical cost
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PFS", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PFS_vrd
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PFS", "QALYs"] = U_PFS_vrd
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PD", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PD_vrd
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd["PD", "QALYs"] = U_PD_vrd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance and  Adverse events and paid for by Cash and QALYs incurred in different states
+    m_payoffs_CASH_Induction_AE_vrd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_vrd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by Cash for Induction, Maintenance, and Adverse events
+    m_payoffs_CASH_Induction_AE_vrd["PFS", "Cost"] = CASH_Induction_AE_PFS_vrd
+    m_payoffs_CASH_Induction_AE_vrd["PFS", "QALYs"] = U_PFS_vrd
+    m_payoffs_CASH_Induction_AE_vrd["PD", "Cost"] = CASH_Induction_AE_PD_vrd
+    m_payoffs_CASH_Induction_AE_vrd["PD", "QALYs"] = U_PD_vrd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance, Adverse events and non-medical costs and paid for by Cash and QALYs incurred in different states
+    m_payoffs_cash_Induction_AE_nonmedical_vrd = matrix(0, nrow = 3, ncol = 2,
+                                                    dimnames = list(state = v_states_names_vrd,
+                                                                    payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by Cash for Induction, Maintenance,Adverse events and non-medical costs
+    m_payoffs_cash_Induction_AE_nonmedical_vrd["PFS", "Cost"] = CASH_Induction_AE_nonmedical_cost_PFS_vrd
+    m_payoffs_cash_Induction_AE_nonmedical_vrd["PFS", "QALYs"] = U_PFS_vrd
+    m_payoffs_cash_Induction_AE_nonmedical_vrd["PD", "Cost"] = CASH_Induction_AE_nonmedical_cost_PD_vrd
+    m_payoffs_cash_Induction_AE_nonmedical_vrd["PD", "QALYs"] = U_PD_vrd
+    
+    #View the matrix with the updated costs and QALYs for each cost- payment option
+    m_payoffs_CASH_Induction_AE_vrd
+    m_payoffs_cash_Induction_AE_nonmedical_vrd
+    m_payoffs_NHIF_Induction_AE_vrd
+    m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+    
+    
+    #total  cost and QALYs for all patients for the different cost options
+    m_payoffs_CASH_Induction_AE_trace_vrd = state_membership_vrd %*% m_payoffs_CASH_Induction_AE_vrd
+    m_payoffs_cash_Induction_AE_nonmedical_trace_vrd= state_membership_vrd %*%m_payoffs_cash_Induction_AE_nonmedical_vrd
+    m_payoffs_NHIF_Induction_AE_trace_vrd = state_membership_vrd %*%m_payoffs_NHIF_Induction_AE_vrd
+    m_payoffs_NHIF_Induction_AE_nonmedical_trace_vrd = state_membership_vrd %*%m_payoffs_NHIF_Induction_AE_nonmedical_vrd
+    
+    average_cost_QALYS_vrd=list(
+    #Average cost and QALYS per patients for each payment option
+    colSums(m_payoffs_CASH_Induction_AE_trace_vrd) / n_patients_vrd,
+    colSums(m_payoffs_cash_Induction_AE_nonmedical_trace_vrd) / n_patients_vrd,
+    colSums(m_payoffs_NHIF_Induction_AE_trace_vrd) / n_patients_vrd,
+    colSums(m_payoffs_NHIF_Induction_AE_nonmedical_trace_vrd) / n_patients_vrd
+)
+    #Adding labels to each output
+    label_names <- c("Average Cost and QALYs (In Induction, Maintenance and AE paid through CASH)",
+                     "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through CASH)",
+                     "Average Cost and QALYs (In Induction, Maintenance and AE paid through NHIF)",
+                     "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through NHIF)")
+  #Title for the overall output
+    cat("Summary of Payoffs Matrix (Normalized by Number of Patients):\n")
+    # Print each labeled output
+    for (i in seq_along(average_cost_QALYS_vrd)) {
+      cat("\n[", i, "]", label_names[i], ":\n")
+      print(average_cost_QALYS_vrd[[i]])
+}
+}
+)
+}
+```
+```{r}
+#Print the Average QALYs and Cost per Patient
+model_vrd(params_vrd)
+```
+
+### Setting up a Markov Model for Lenalidomide + Dexamethasone (RD)  the Reference Arm
+A markov model of 3-states (Progressive Free Survival(PFS), Progressive Disease (PD), Death), setting up the transitional matrix
+```{r}
+#Creating the transition matrix of RD
+tm_rd <- matrix(c(0.97369,0.02631, 0, 0,0.97638, 0.02362, 0,0,1),nrow = 3, byrow = TRUE)
+tm_rd
+
+#create the Discrete Time Markov Chain
+rd_trans <- new("markovchain",transitionMatrix=tm_rd, states=c("PFS","PD", "Death"), name="Markov Chain for RD") 
+rd_trans
+
+#Visualize the Movement from one state to another
+plot(rd_trans)
+```
+
+### List of all parameters in the model
+The parameters include: transitional probabilities, costs, utilities e.t.c
+```{r}
+#List of all parameters in RD
+params_rd = list(
+  #Transition Probability from PFS to PD
+  p_pfs_pd_rd = 0.02631, 
+  #Transition Probability from PD to Death
+  p_pd_death_rd = 0.02362, 
+
+  #Cost incurred in PFS State during induction, Maintenance and in Adverse Events, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_PFS_rd = 17196.47715,
+  
+  #Cost incurred in PD State during induction, Maintenance and in Adverse Events, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_PD_rd = 25094.08297,
+  
+  #Cost incurred in PFS State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_nonmedicalcost_PFS_rd = 22677.24638,
+  
+  #Cost incurred in PD State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by NHIF(Insurance)
+  NHIF_Induction_AE_nonmedicalcost_PD_rd = 30007.87607,
+  
+  #Cost incurred in PFS State during induction, Maintenance and adverse Events, when some payments were made by Cash
+  CASH_Induction_AE_PFS_rd =16323.78485,
+  
+  #Cost incurred in PD State during induction, Maintenance and adverse Events when some payments were made by Cash
+  CASH_Induction_AE_PD_rd = 23932.35883,
+  
+  #Cost incurred in PFS State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by CASH
+  CASH_Induction_AE_nonmedical_cost_PFS_rd = 21804.55408,
+  
+  #Cost incurred in PD State during induction, Maintenance, adverse Events and including non-medical costs, when some payments were made by Cash
+  CASH_Induction_AE_nonmedical_cost_PD_rd = 28846.15193,
+  
+  #Utilities in PFS state
+  U_PFS_rd = 0.81,
+  #Utilities in PD stat
+  U_PD_rd = 0.645
+)
+```
+
+### A Model that calculates the QALYs and Average Cost per patient
+
+```{r}
+#Create a function of the parameters
+model_rd = function(.params_rd) {
+  with(.params_rd, {
+    #Number of cycles in the life horizon of the study
+    n_cycles_rd = 72
+    #Number of States
+    n_states_rd = 3
+    #Number of Patients
+    n_patients_rd = 1000
+    #The states in VRD
+    v_states_names_rd = c("PFS", "PD", "Death")
+    #Create a transition matrix with zero values, its 3 by 3 because of 3-states
+    m_p_rd = matrix(0, nrow = 3, ncol = 3,
+                 dimnames = list(from = v_states_names_rd,
+                                 to = v_states_names_rd))
+    #Update the matrix with the actual values of moving from one state to another
+    #Update the transitional probability of moving from PFS to PFS
+    m_p_rd["PFS", "PFS"] = 1 - p_pfs_pd_rd
+    #Update the transitional probability of moving from PFS to PD
+    m_p_rd["PFS", "PD"] = p_pfs_pd_rd
+    #Update the transitional probability of moving from PFS to Death
+    m_p_rd["PFS", "Death"] = 0
+    #Update the transitional probability of moving from PD to Death
+    m_p_rd["PD", "Death"] = p_pd_death_rd
+    #Update the transitional probability of moving from PD to PFS
+    m_p_rd["PD", "PFS"] = 0
+    #Update the transitional probability of moving from PD to PD
+    m_p_rd["PD", "PD"] = 1- p_pd_death_rd
+    #Update the transitional probability of moving from Death to Death
+    m_p_rd["Death", "Death"] = 1
+    
+    #Create state membership matrix
+    state_membership_rd = array(NA_real_,
+                             dim = c(n_cycles_rd, n_states_rd),
+                             dimnames = list(cycle = 1:n_cycles_rd,
+                                             state = v_states_names_rd))
+    #Update the first state membership with 1000, at the start all the patients are in PFS state
+    state_membership_rd[1, ] = c(n_patients_rd, 0, 0)
+    
+    #Update the rest of the state membership with the number of patients at each state and each cycle
+    for (i in 2:n_cycles_rd) {
+      state_membership_rd[i, ] = state_membership_rd[i-1, ] %*% m_p_rd
+    }
+    
+    #A zero matrix for cost incurred in Induction, Maintenance and Adverse events paid for by NHIF and QALYs incurred in different states
+    m_payoffs_NHIF_Induction_AE_rd = matrix(0, nrow = 3, ncol = 2,
+                       dimnames = list(state = v_states_names_rd,
+                                       payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by NHIF for Induction, Maintenance and Adverse events
+    m_payoffs_NHIF_Induction_AE_rd["PFS", "Cost"] = NHIF_Induction_AE_PFS_rd
+    m_payoffs_NHIF_Induction_AE_rd["PFS", "QALYs"] = U_PFS_rd
+    m_payoffs_NHIF_Induction_AE_rd["PD", "Cost"] = NHIF_Induction_AE_PD_rd
+    m_payoffs_NHIF_Induction_AE_rd["PD", "QALYs"] = U_PD_rd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance, Adverse events and non-medical costs and paid for by NHIF and QALYs incurred in different states
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_rd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by NHIF for Induction, Maintenance, Adverse events and non-medical cost
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd["PFS", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PFS_rd
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd["PFS", "QALYs"] = U_PFS_rd
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd["PD", "Cost"] = NHIF_Induction_AE_nonmedicalcost_PD_rd
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd["PD", "QALYs"] = U_PD_rd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance and  Adverse events and paid for by Cash and QALYs incurred in different states
+    m_payoffs_CASH_Induction_AE_rd = matrix(0, nrow = 3, ncol = 2,
+                                         dimnames = list(state = v_states_names_rd,
+                                                         payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by Cash for Induction, Maintenance, and Adverse events
+    m_payoffs_CASH_Induction_AE_rd["PFS", "Cost"] = CASH_Induction_AE_PFS_rd
+    m_payoffs_CASH_Induction_AE_rd["PFS", "QALYs"] = U_PFS_rd
+    m_payoffs_CASH_Induction_AE_rd["PD", "Cost"] = CASH_Induction_AE_PD_rd
+    m_payoffs_CASH_Induction_AE_rd["PD", "QALYs"] = U_PD_rd
+    
+    #A zero matrix for cost incurred in Induction, Maintenance, Adverse events and non-medical costs and paid for by Cash and QALYs incurred in different states
+    m_payoffs_cash_Induction_AE_nonmedical_rd = matrix(0, nrow = 3, ncol = 2,
+                                                    dimnames = list(state = v_states_names_rd,
+                                                                    payoffs = c("Cost", "QALYs")))
+    
+    #Update actual cost and QALYs in PFS and PD State when cost is paid by Cash for Induction, Maintenance,Adverse events and non-medical costs
+    m_payoffs_cash_Induction_AE_nonmedical_rd["PFS", "Cost"] = CASH_Induction_AE_nonmedical_cost_PFS_rd
+    m_payoffs_cash_Induction_AE_nonmedical_rd["PFS", "QALYs"] = U_PFS_rd
+    m_payoffs_cash_Induction_AE_nonmedical_rd["PD", "Cost"] = CASH_Induction_AE_nonmedical_cost_PD_rd
+    m_payoffs_cash_Induction_AE_nonmedical_rd["PD", "QALYs"] = U_PD_rd
+    
+    #View the matrix with the updated costs and QALYs for each cost- payment option
+    m_payoffs_CASH_Induction_AE_rd
+    m_payoffs_cash_Induction_AE_nonmedical_rd
+    m_payoffs_NHIF_Induction_AE_rd
+    m_payoffs_NHIF_Induction_AE_nonmedical_rd
+    
+    
+    #total  cost and QALYs for all patients for the different cost options
+    m_payoffs_CASH_Induction_AE_trace_rd = state_membership_rd %*% m_payoffs_CASH_Induction_AE_rd
+    m_payoffs_cash_Induction_AE_nonmedical_trace_rd= state_membership_rd %*%m_payoffs_cash_Induction_AE_nonmedical_rd
+    m_payoffs_NHIF_Induction_AE_trace_rd = state_membership_rd %*%m_payoffs_NHIF_Induction_AE_rd
+    m_payoffs_NHIF_Induction_AE_nonmedical_trace_rd = state_membership_rd %*%m_payoffs_NHIF_Induction_AE_nonmedical_rd
+    
+    average_cost_QALYS_rd=list(
+    #Average cost and QALYS per patients for each payment option
+    colSums(m_payoffs_CASH_Induction_AE_trace_rd) / n_patients_rd,
+    colSums(m_payoffs_cash_Induction_AE_nonmedical_trace_rd) / n_patients_rd,
+    colSums(m_payoffs_NHIF_Induction_AE_trace_rd) / n_patients_rd,
+    colSums(m_payoffs_NHIF_Induction_AE_nonmedical_trace_rd) / n_patients_rd
+)
+    #Adding labels to each output
+    label_names_rd <- c("Average Cost and QALYs (In Induction, Maintenance and AE paid through CASH)",
+                     "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through CASH)",
+                     "Average Cost and QALYs (In Induction, Maintenance and AE paid through NHIF)",
+                     "Average Cost and QALYs (In Induction, Maintenance, AE and Non-Medical paid through NHIF)")
+  #Title for the overall output
+    cat("Summary of Payoffs Matrix (Normalized by Number of Patients):\n")
+    # Print each labeled output
+    for (i in seq_along(average_cost_QALYS_rd)) {
+      cat("\n[", i, "]", label_names_rd[i], ":\n")
+      print(average_cost_QALYS_rd[[i]])
+}
+}
+)
+}
+```
+```{r}
+#Print the Average QALYs and Cost per Patient
+model_rd(params_rd)
+```
