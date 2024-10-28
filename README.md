@@ -36,9 +36,11 @@ The expected outcomes from the analysis include:
 - Quality-Adjusted Life Years (QALYs): Estimates of QALYs gained for each treatment option, indicating the expected health benefits and overall effectiveness of the treatments.
 - Cost-Effectiveness Analysis: A comparative framework that presents the cost per QALY for each regimen, allowing healthcare providers to make informed decisions regarding treatment options based on value.
 
-## Recommendations: Based on the findings, recommendations can be made regarding the preferred treatment option, considering both cost and patient outcomes. This may include suggestions for policy changes or adjustments in treatment protocols based on economic evaluations.
+## Recommendations: 
+Based on the findings, recommendations can be made regarding the preferred treatment option, considering both cost and patient outcomes. This may include suggestions for policy changes or adjustments in treatment protocols based on economic evaluations.
 
-## Visualizations: Graphical representations of the transition matrices, cost distributions, and QALYs will enhance understanding and communication of the results to stakeholders.
+## Visualizations: 
+Graphical representations of the transition matrices, cost distributions, and QALYs will enhance understanding and communication of the results to stakeholders.
 
 ## Conclusion
 This Markov model framework facilitates a comprehensive evaluation of the cost-effectiveness of chemotherapy options for multiple myeloma patients. By analyzing transition probabilities, patient outcomes, and associated costs, the project aims to inform healthcare decision-making and optimize resource allocation in oncology. Future steps may include sensitivity analyses and incorporating additional variables to enhance the model's robustness and applicability.
